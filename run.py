@@ -6,8 +6,16 @@ import time
 from agent import *
 
 if __name__ == "__main__":
-	env = gym.make('Breakout-v0')
+    env = gym.make('Breakout-v0')
 
+    state_size = env.observation_space.shape[0]
+    print(state_size)
+    with Agent(env, state_size) as agent:
+        agent.train_network()
+
+    env.close()
+
+    '''
 	for game in range(5):
 		observation = env.reset()
 		done = False
@@ -19,15 +27,4 @@ if __name__ == "__main__":
 			total_reward += reward
 			time.sleep(1.0/60.0)
 		print("Finished with total score {}".format(total_reward))
-
-	env.close()
-
-'''
-    env = gym.make('Pendulum-v0')
-    state_size = env.observation_space.shape[0] 
-
-    with Agent(env, state_size) as agent:
-        agent.train_network()
-
-    print('Done!')
-'''
+	'''
