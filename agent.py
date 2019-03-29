@@ -7,7 +7,7 @@ import numpy as np
 import random
 import keras
 from keras.models import Sequential
-from keras.layers import Dense
+from keras.layers import Dense, Dropout
 from statistics import mean, median
 
 
@@ -24,7 +24,7 @@ class Agent:
             self.action_space[n][n] = 1
 
         # Input size will be the size of the previous sequence buffer, which
-        # includes a sample of states and inputs up to the current:
+        # includes a sample of states and inputs up to the the most recent:
         self.input_size = sequence_length*(self.env.action_space.n + self.state_size) - self.env.action_space.n
 
         self.memory = []
@@ -36,25 +36,31 @@ class Agent:
         self.build_model()
         # For saving and loading the graph after training:
         self.saver = tf.train.Saver(save_relative_paths=True)
-        self.sess = tf.Session()
-        self.sess.run(tf.global_variables_initializer())
+
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.sess.close()
+    # TODO: Has hold rate changed to dropout?
+    def build_model(self, hidden_layers=4, layer_connections=128, hold_rate=0.5):
+        # First dimension is the batch size:
+        self.x_input = Dense(layer_connections, input_shape=(self.input_size,), activation='relu')
 
-    def build_model(self, fc_layers=4, layer_connections=128, hold_rate=1.0):
-        self.model = Sequential()
-        # self.model.add(keras.layers.Dropout(hold_rate))
-        for layer in range(fc_layers):
-            self.model.add(Dense(layer_connections,input_shape=(None, self.input_size), activation='relu'))
-            self.model.add(keras.Dropout(hold_rate))
+        for layer in range(hidden_layers-1):
+            if(layer is 0):
+                hidden_layer = Dense(layer_connections, activation='relu')(self.x_input)
+            else:
+                hidden_layer = Dense(layer_connections, activation='relu')(hidden_layer)
+            dropout = Dropout(hold_rate)(hidden_layer)
 
-        self.model.add(Dense(self.env.action_space.n))  # Output layer.
+        self.y_outputs = Dense(self.env.action_space.n)  # Output layer.
 
-        self.model.compile(loss='mean_squared_error', metrics=['accuracy'], loss_weights=[1 for x in range(self.env.action_space.n)], optimizer='adam')
+        # TODO: Model only allows 1 sample for now:
+        self.action_q_values = [q_value for q_value in self.y_outputs[0]]
+
+        self.model = Model(inputs=self.x_input, outputs=self.action_q_values)
+        #self.model.summary()
+        self.model.compile(loss='mean_squared_error', loss_weights=[1.0 for i in range(self.env.action_space.n)], metrics=['accuracy'], optimizer='adam')
 
     def process_sequence(self, sequence_data):
         # Pass in the full list of sequence data and this will preprocess into
@@ -79,9 +85,7 @@ class Agent:
         return p_buffer.reshape((-1, len(p_buffer)))
 
     def get_best_action(self, x_input):
-        output = self.sess.run(
-            self.output_layer, feed_dict={
-                self.input_data: x_input})
+        output = self.model.predict(x_input)
         return np.argmax(output, axis=1)[0]
 
     def get_output(self, x_input):
@@ -143,7 +147,7 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=250.0, games=200000, batch_size=32, initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=30000, gamma=0.95, score_sample_size=250):
+    def train_network(self, target_mean_score=250.0, games=1000, batch_size=32, initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=30000, gamma=0.95, score_sample_size=250):
         # Trains the agent.
         # Play randomly until memory has at least batch_size entries
         while(len(self.memory) < batch_size):
@@ -154,11 +158,10 @@ class Agent:
             # Scales linearly from initial to final epsilon up to epsilon
             # frames range:
             if(total_frames < epsilon_frames_range):
-                e = initial_epsilon - \
-                    ((initial_epsilon - final_epsilon) * (total_frames / epsilon_frames_range))
+                e = initial_epsilon - ((initial_epsilon - final_epsilon) * (total_frames / epsilon_frames_range))
             else:
                 e = final_epsilon
-            # Play a random game, and record data to memory buffer
+            # Play a random game, and record data to memory buffer:
             score, frames = self.get_samples(False, 1, epsilon=e)
             scores.append(score)
             m_score = mean(scores)
@@ -167,29 +170,20 @@ class Agent:
                 scores = scores[1:]
 
             total_frames += frames
-            print(
-                'Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(
-                    game, score, m_score, total_frames, e))
+            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(game, score, m_score, total_frames, e))
 
             if((m_score >= target_mean_score) and (len(scores) > 100)):
                 print('Target mean score reached')
                 break
+            # Sample and train on mini-batch:
             mini_batch = random.sample(self.memory, batch_size)
             for p_state, action, reward, p_next_state, done in mini_batch:
                 target = reward
                 if(not done):
-                    target = reward + gamma * \
-                        self.get_best_q_value(p_next_state)
-
-                # Predicted Q-Values for this state.
-                predicted_q_values = self.get_output(p_state)
-                target_q_values = predicted_q_values[action]
-                target_q_values[action] = target  # New target for this action.
+                    target = reward + gamma*self.get_best_q_value(p_next_state)
 
                 # Train:
-                # TODO: ATM this will only train on a single batch at a time:
-                self.model.fit(p_state, [[target_q_values[i]]
-                                         for i in range(self.env.action_space.n)])
+                self.model.fit(p_state, np.array([target_q_values]), verbose=0)
 
         print('Training complete')
         save_path = self.saver.save(self.sess, 'saved/model.ckpt')
@@ -205,15 +199,13 @@ class Agent:
         total_frames = 0
         for game in range(games):
             game_num = game + 1
-            score, frames = self.get_samples(
-                False, 1, epsilon=epsilo, display_frames=show_game)
+            score, frames = self.get_samples(False, 1, epsilon=epsilo, display_frames=show_game)
             scores.append(score)
             m_score = mean(scores)
             med_score = median(scores)
 
             total_frames += frames
-            print(
-                'Games: {} Score: {}, Mean Score: {:.2f}, Median: {:.2f} Total Frames: {}'.format(
+            print('Games: {} Score: {}, Mean Score: {:.2f}, Median: {:.2f} Total Frames: {}'.format(
                     game_num,
                     score,
                     m_score,
