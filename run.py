@@ -7,9 +7,7 @@ from agent import *
 
 if __name__ == "__main__":
     env = gym.make('CartPole-v1')
-
     state_size = env.observation_space.shape[0]
-    print(env.observation_space)
     with Agent(env, state_size) as agent:
         agent.train_network()
 

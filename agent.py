@@ -7,7 +7,7 @@ import numpy as np
 import random
 import keras
 from keras.models import Sequential
-from keras.layers import Dense, Dropout
+from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
 
 
@@ -44,21 +44,23 @@ class Agent:
     # TODO: Has hold rate changed to dropout?
     def build_model(self, hidden_layers=4, layer_connections=128, hold_rate=0.5):
         # First dimension is the batch size:
-        self.x_input = Dense(layer_connections, input_shape=(self.input_size,), activation='relu')
+        self.x_input = Input(shape=(self.input_size,), name='y')
 
-        for layer in range(hidden_layers-1):
+        for (layer in range(hidden_layers)):
             if(layer is 0):
                 hidden_layer = Dense(layer_connections, activation='relu')(self.x_input)
             else:
-                hidden_layer = Dense(layer_connections, activation='relu')(hidden_layer)
-            dropout = Dropout(hold_rate)(hidden_layer)
+                dropout = Dropout(hold_rate)(hidden_layer)
+                hidden_layer = Dense(layer_connections, activation='relu')(dropout)
 
-        self.y_outputs = Dense(self.env.action_space.n)  # Output layer.
+        # Different output for each action:
+        self.y_outputs = []
+        for action_index in range(self.env.action_space.n):
+            self.y_outputs.append(Dense(1, activation=relu)(hidden_layer))
+        self.y_outputs = Dense(self.env.action_space.n)(hidden_layer)  # Output layer.
 
-        # TODO: Model only allows 1 sample for now:
-        self.action_q_values = [q_value for q_value in self.y_outputs[0]]
 
-        self.model = Model(inputs=self.x_input, outputs=self.action_q_values)
+        self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
         #self.model.summary()
         self.model.compile(loss='mean_squared_error', loss_weights=[1.0 for i in range(self.env.action_space.n)], metrics=['accuracy'], optimizer='adam')
 
