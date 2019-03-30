@@ -11,13 +11,12 @@ from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
 
-
-def cust_loss(y_true, y_pred):
+def squared_difference(y_true, y_pred): # Custom loss function:
     return (y_true[0] - y_pred[0])**2
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=1e-4, sequence_length=10, memory_size=100000):
+    def __init__(self, environment, state_size, learning_rate=2e-5, sequence_length=10, memory_size=100000):
         self.env = environment
         self.sequence_length = sequence_length
         self.state_size = state_size
@@ -41,7 +40,7 @@ class Agent:
         # For saving and loading the graph after training:
         self.saver = tf.train.Saver(save_relative_paths=True)
 
-    def build_model(self, hidden_layers=5, layer_connections=128, drop_rate=0.0):
+    def build_model(self, hidden_layers=4, layer_connections=128, drop_rate=0.0):
         # First dimension is the batch size:
         self.x_input = Input(shape=(self.input_size,), name='y')
 
@@ -60,9 +59,12 @@ class Agent:
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
         #self.model.summary()
-        self.model.compile(loss=cust_loss, loss_weights=[1.0 for n in range(self.env.action_space.n)], metrics=['accuracy'], optimizer='adam')
-        K.set_value(self.model.optimizer.lr, 1e-4)
-
+        self.model.compile(
+            loss=squared_difference,
+            loss_weights=[1.0 for n in range(self.env.action_space.n)],
+            metrics=['accuracy'],
+            optimizer='adam')
+        K.set_value(self.model.optimizer.lr, self.lr)
 
     def process_sequence(self, sequence_data):
         # Pass in the full list of sequence data and this will preprocess into
@@ -78,7 +80,7 @@ class Agent:
                 i += 1
                 p_buffer[p_size - i] = sequence_data[len(sequence_data) - i]
             else:
-                # For the sake of simplicity, I will fill the remaining buffer with 0's:
+            # For the sake of simplicity, I've filled the remaining buffer with 0's:
                 for index in range(p_size - i):
                     p_buffer[index] = 0
                 i = p_size
@@ -171,10 +173,11 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=1000, batch_size=64, initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000, gamma=0.95, score_sample_size=250):
+    def train_network(self, target_mean_score=245.0, games=1000, batch_size=32, initial_epsilon=1.0,
+    final_epsilon=0.05, epsilon_frames_range=10000, gamma=0.95, score_sample_size=250):
         # Trains the agent.
-        # Play randomly until memory has at least batch_size entries
-        print("Training")
+        # Play randomly until memory has at least batch_size entries:
+        print("Training...")
         while(len(self.memory) < batch_size):
             self.get_samples(False, 1, epsilon=1.0)
         total_frames = 0
@@ -202,7 +205,8 @@ class Agent:
             # Sample and train on mini-batch:
             mini_batch = random.sample(self.memory, batch_size)
             p_batch = []
-            target_q_batch = []
+            # Seperate list of batches for each action:
+            target_q_batches = [[] for action_n in range(self.env.action_space.n)]
             for p_state, action, reward, p_next_state, done in mini_batch:
                 target = reward
                 if(not done):
@@ -210,13 +214,18 @@ class Agent:
 
                 # Predicted Q-values for each action according to the model:
                 q_values = self.model.predict(p_state, batch_size=1)
-                actual = self.model.predict(p_state, batch_size=1)
                 q_values[action] = np.array([target]) # With updated target.
 
-                #print(K.get_value(self.model.optimizer.lr))
+                p_batch.append(p_state[0])
+                for action_n in range(len(q_values)):
+                    target_q_batches[action_n].append(q_values[action_n][0])
 
-                # Try to fit to the target Q-values for each action:
-                self.model.train_on_batch(p_state, q_values)
+            for batch_index in range(len(target_q_batches)):
+                target_q_batches[batch_index] = np.array(target_q_batches[batch_index])
+
+            # Try to fit to the target Q-values for each action:
+            print(self.model.metrics_names)
+            print(self.model.train_on_batch(np.array(p_batch), target_q_batches))
 
         print('Training complete')
         # TODO: Model saving:
