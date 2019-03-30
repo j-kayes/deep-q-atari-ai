@@ -1,7 +1,7 @@
-'''
-    Agent learns to beat the Atari games from OpenAI gym.
-    Copywrite James Kayes (c) 2019
-'''
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Agent learns to beat the Atari games from OpenAI gym.
+Copywrite James Kayes (c) 2019
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 import tensorflow as tf
 import numpy as np
 import random
@@ -10,13 +10,15 @@ import keras.backend as K
 from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
+from adjusted_optimizer import AdjustedAdam
 
 def squared_difference(y_true, y_pred): # Custom loss function:
     return (y_true[0] - y_pred[0])**2
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=2e-5, sequence_length=10, memory_size=100000):
+    def __init__(self, environment, state_size, learning_rate=1e-4,
+                sequence_length=10, memory_size=100000):
         self.env = environment
         self.sequence_length = sequence_length
         self.state_size = state_size
@@ -58,12 +60,13 @@ class Agent:
 
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
+        custom_optimizer = AdjustedAdam()
         #self.model.summary()
         self.model.compile(
             loss=squared_difference,
             loss_weights=[1.0 for n in range(self.env.action_space.n)],
             metrics=['accuracy'],
-            optimizer='adam')
+            optimizer=custom_optimizer)
         K.set_value(self.model.optimizer.lr, self.lr)
 
     def process_sequence(self, sequence_data):
@@ -121,7 +124,8 @@ class Agent:
 
         return best_q
 
-    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250, epsilon=1.0, display_frames=False):
+    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250,
+                    epsilon=1.0, display_frames=False):
         # Will append the memory with state/action/reward data and return the
         # average score:
         game_counter = 0
@@ -197,7 +201,8 @@ class Agent:
 
             m_score = mean(scores)
             total_frames += frames
-            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(game, score, m_score, total_frames, e))
+            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(
+            game, score, m_score, total_frames, e))
 
             if((m_score >= target_mean_score) and (len(scores) > 100)):
                 print('Target mean score reached')
@@ -224,8 +229,7 @@ class Agent:
                 target_q_batches[batch_index] = np.array(target_q_batches[batch_index])
 
             # Try to fit to the target Q-values for each action:
-            print(self.model.metrics_names)
-            print(self.model.train_on_batch(np.array(p_batch), target_q_batches))
+            self.model.train_on_batch(np.array(p_batch), target_q_batches)
 
         print('Training complete')
         # TODO: Model saving:
