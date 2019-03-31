@@ -17,7 +17,8 @@ def cust_loss(y_true, y_pred):
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=1e-4, sequence_length=10, memory_size=100000):
+    def __init__(self, environment, state_size, learning_rate=1e-4,
+    sequence_length=10, memory_size=100000):
         self.env = environment
         self.sequence_length = sequence_length
         self.state_size = state_size
@@ -60,7 +61,10 @@ class Agent:
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
         #self.model.summary()
-        self.model.compile(loss=cust_loss, loss_weights=[1.0 for n in range(self.env.action_space.n)], metrics=['accuracy'], optimizer='adam')
+        self.model.compile(loss=cust_loss,
+        loss_weights=[1.0 for n in range(self.env.action_space.n)],
+        metrics=['accuracy'],
+        optimizer='sgd')
         K.set_value(self.model.optimizer.lr, 1e-4)
 
 
@@ -119,7 +123,8 @@ class Agent:
 
         return best_q
 
-    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250, epsilon=1.0, display_frames=False):
+    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250,
+    epsilon=1.0, display_frames=False):
         # Will append the memory with state/action/reward data and return the
         # average score:
         game_counter = 0
@@ -171,7 +176,9 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=1000, batch_size=64, initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000, gamma=0.95, score_sample_size=250):
+    def train_network(self, target_mean_score=245.0, games=1000, batch_size=64,
+    initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
+    gamma=0.95, score_sample_size=250):
         # Trains the agent.
         # Play randomly until memory has at least batch_size entries
         print("Training")
@@ -194,7 +201,8 @@ class Agent:
 
             m_score = mean(scores)
             total_frames += frames
-            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(game, score, m_score, total_frames, e))
+            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(
+            game, score, m_score, total_frames, e))
 
             if((m_score >= target_mean_score) and (len(scores) > 100)):
                 print('Target mean score reached')
