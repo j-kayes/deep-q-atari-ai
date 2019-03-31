@@ -10,7 +10,7 @@ import keras.backend as K
 from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
-from adjusted_optimizer import AdjustedAdam
+from keras.optimizers import SGD, Adam
 
 def squared_difference(y_true, y_pred): # Custom loss function:
     return (y_true[0] - y_pred[0])**2
@@ -18,7 +18,7 @@ def squared_difference(y_true, y_pred): # Custom loss function:
 class Agent:
 
     def __init__(self, environment, state_size, learning_rate=1e-4,
-                sequence_length=10, memory_size=100000):
+    sequence_length=10, memory_size=100000):
         self.env = environment
         self.sequence_length = sequence_length
         self.state_size = state_size
@@ -60,14 +60,12 @@ class Agent:
 
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
-        custom_optimizer = AdjustedAdam()
         #self.model.summary()
         self.model.compile(
             loss=squared_difference,
             loss_weights=[1.0 for n in range(self.env.action_space.n)],
             metrics=['accuracy'],
-            optimizer=custom_optimizer)
-        K.set_value(self.model.optimizer.lr, self.lr)
+            optimizer=Adam())
 
     def process_sequence(self, sequence_data):
         # Pass in the full list of sequence data and this will preprocess into
@@ -177,7 +175,7 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=1000, batch_size=32, initial_epsilon=1.0,
+    def train_network(self, target_mean_score=245.0, games=2500, batch_size=1, initial_epsilon=1.0,
     final_epsilon=0.05, epsilon_frames_range=10000, gamma=0.95, score_sample_size=250):
         # Trains the agent.
         # Play randomly until memory has at least batch_size entries:
