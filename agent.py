@@ -11,14 +11,13 @@ from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
 
-
-def cust_loss(y_true, y_pred):
+def squared_difference(y_true, y_pred):
     return (y_true[0] - y_pred[0])**2
 
 class Agent:
 
     def __init__(self, environment, state_size, learning_rate=1e-4,
-    sequence_length=10, memory_size=100000):
+    memory_trace_size=10, memory_size=100000, input_x=64, input_y=84):
         self.env = environment
         self.sequence_length = sequence_length
         self.state_size = state_size
@@ -28,15 +27,13 @@ class Agent:
         for n in range(self.env.action_space.n):
             self.action_space[n][n] = 1
 
-        # Input size will be the size of the previous sequence buffer which
-        # includes a sample of states and inputs up to the the most recent:
-        self.input_size = sequence_length*(self.env.action_space.n + self.state_size) - self.env.action_space.n
-
         self.memory = []
         self.memory_size = memory_size
         self.memory_index = 0
 
         self.lr = learning_rate
+        # Input to the model is a sequence of scaled down screen states:
+        self.input_shape = (memory_trace_size, input_x, input_y)
 
         self.build_model()
         # For saving and loading the graph after training:
@@ -44,7 +41,7 @@ class Agent:
 
     def build_model(self, hidden_layers=5, layer_connections=128, drop_rate=0.0):
         # First dimension is the batch size:
-        self.x_input = Input(shape=(self.input_size,), name='y')
+        self.x_input = Input(shape=self.input_shape, name='y')
 
         for layer in range(hidden_layers):
             if(layer is 0):
@@ -61,33 +58,18 @@ class Agent:
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
         #self.model.summary()
-        self.model.compile(loss=cust_loss,
+        self.model.compile(loss=squared_difference,
         loss_weights=[1.0 for n in range(self.env.action_space.n)],
         metrics=['accuracy'],
-        optimizer='sgd')
-        K.set_value(self.model.optimizer.lr, 1e-4)
+        optimizer='adam')
+        K.set_value(self.model.optimizer.lr, self.lr)
 
 
-    def process_sequence(self, sequence_data):
-        # Pass in the full list of sequence data and this will preprocess into
-        # the p_buffer, so that it can be fed to the graph.
+    def process_sequence(self, sequence_data, trace_size):
+        # Down samples and processes a sequence of data in a memory trace of the
+        # size needed by the model.
+        sequence_trace = sequence_data[-trace_size:]
 
-        # Processed sequence needs to be the same size as the input:
-        p_size = self.input_size
-        p_buffer = np.zeros(shape=p_size)
-        i = 0
-        # Loop backwards through p_buffer:
-        while(i < p_size):
-            if(i < len(sequence_data)):
-                i += 1
-                p_buffer[p_size - i] = sequence_data[len(sequence_data) - i]
-            else:
-                # For the sake of simplicity, I will fill the remaining buffer with 0's:
-                for index in range(p_size - i):
-                    p_buffer[index] = 0
-                i = p_size
-
-        return p_buffer.reshape((-1, len(p_buffer)))
 
     def get_best_action(self, x_input, batch_index=0):
         # List of q-values for each action:
@@ -134,7 +116,7 @@ class Agent:
             game_counter += 1
             initial_state = self.env.reset()
             sequence = []  # Sequence of states
-            sequence.extend(initial_state)
+            sequence.append(initial_state)
             score = 0.0
             # Auto-reset after this:
             for t in range(max_t):
@@ -154,7 +136,7 @@ class Agent:
                     self.env.render()
                 score += reward
                 if(not done):
-                    sequence.extend(np.concatenate((self.action_space[action], next_state)).tolist())
+                    sequence.append(next_state)
                 processed_next_state = self.process_sequence(sequence)
                 # Append to memory (up to limit):
                 if(len(self.memory) < self.memory_size):
@@ -176,7 +158,7 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=1000, batch_size=64,
+    def train_network(self, target_mean_score=245.0, games=250, batch_size=32,
     initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
     gamma=0.95, score_sample_size=250):
         # Trains the agent.

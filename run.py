@@ -6,7 +6,7 @@ import time
 from agent import *
 
 if __name__ == "__main__":
-    env = gym.make('CartPole-v1')
+    env = gym.make('breakout-v1')
     state_size = env.observation_space.shape[0]
     agent = Agent(env, state_size)
     agent.train_network()
