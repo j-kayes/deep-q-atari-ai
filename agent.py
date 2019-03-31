@@ -2,7 +2,6 @@
     Agent learns to beat the Atari games from OpenAI gym.
     Copywrite James Kayes (c) 2019
 '''
-import tensorflow as tf
 import numpy as np
 import random
 import keras
@@ -14,12 +13,42 @@ from statistics import mean, median
 def squared_difference(y_true, y_pred):
     return (y_true[0] - y_pred[0])**2
 
+    #TODO: Test this:
+def bilinear_interpolate(im, new_width, new_height):
+        x = [v for v in range(new_width)]
+        y = [v for v in range(new_height)]
+
+        x = np.asarray(x)
+        y = np.asarray(y)
+
+        x0 = np.floor(x).astype(int)
+        x1 = x0 + 1
+        y0 = np.floor(y).astype(int)
+        y1 = y0 + 1
+
+        x0 = np.clip(x0, 0, im.shape[1]-1);
+        x1 = np.clip(x1, 0, im.shape[1]-1);
+        y0 = np.clip(y0, 0, im.shape[0]-1);
+        y1 = np.clip(y1, 0, im.shape[0]-1);
+
+        Ia = im[ y0, x0 ]
+        Ib = im[ y1, x0 ]
+        Ic = im[ y0, x1 ]
+        Id = im[ y1, x1 ]
+
+        wa = (x1-x) * (y1-y)
+        wb = (x1-x) * (y-y0)
+        wc = (x-x0) * (y1-y)
+        wd = (x-x0) * (y-y0)
+
+        return wa*Ia + wb*Ib + wc*Ic + wd*Id
+
 class Agent:
 
     def __init__(self, environment, state_size, learning_rate=1e-4,
-    memory_trace_size=10, memory_size=100000, input_x=64, input_y=84):
+    trace_size=10, memory_size=100000, input_x=64, input_y=84):
         self.env = environment
-        self.sequence_length = sequence_length
+        self.trace_size = trace_size
         self.state_size = state_size
 
         self.action_space = np.zeros(shape=(self.env.action_space.n, self.env.action_space.n))
@@ -33,11 +62,9 @@ class Agent:
 
         self.lr = learning_rate
         # Input to the model is a sequence of scaled down screen states:
-        self.input_shape = (memory_trace_size, input_x, input_y)
+        self.input_shape = (trace_size, input_y, input_x)
 
         self.build_model()
-        # For saving and loading the graph after training:
-        self.saver = tf.train.Saver(save_relative_paths=True)
 
     def build_model(self, hidden_layers=5, layer_connections=128, drop_rate=0.0):
         # First dimension is the batch size:
@@ -64,12 +91,28 @@ class Agent:
         optimizer='adam')
         K.set_value(self.model.optimizer.lr, self.lr)
 
-
-    def process_sequence(self, sequence_data, trace_size):
+    def process_sequence(self, sequence_data):
         # Down samples and processes a sequence of data in a memory trace of the
         # size needed by the model.
-        sequence_trace = sequence_data[-trace_size:]
+        sequence_trace = sequence_data[-self.trace_size:]
+        sequence_diff = self.trace_size - len(sequence_trace)
 
+        if(sequence_diff > 0):
+            for i in range(sequence_diff):
+                # Duplicate last state:
+                sequence_trace.append(sequence_trace[-1])
+
+        sequence_trace = np.array(sequence_trace)
+        # Remove colour:
+        sequence_trace = np.mean(sequence_trace, axis=3)
+        print("Seq:" + str(sequence_trace.shape))
+        # Down sample:
+        # Could also try tensorflow image downsampling:
+        downsampled_trace = []
+        for state_image in sequence_trace:
+            downsampled_trace.append(bilinear_interpolate(state_image, 84, 84))
+        downsampled_trace = np.array(downsampled_trace)
+        print("Downsampled: " + str(downsampled_trace.shape))
 
     def get_best_action(self, x_input, batch_index=0):
         # List of q-values for each action:
