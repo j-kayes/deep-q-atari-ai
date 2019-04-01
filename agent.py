@@ -38,20 +38,18 @@ class Agent:
 
         self.build_model()
 
-    def build_model(self, hidden_layers=5, layer_connections=128, drop_rate=0.0):
+    def build_model(self, drop_rate=0.0):
         self.x_input = Input(shape=self.input_shape, name='x')
 
-        for layer in range(hidden_layers):
-            if(layer is 0):
-                hidden_layer = Dense(layer_connections, activation='relu')(self.x_input)
-            else:
-                dropout = Dropout(drop_rate)(hidden_layer)
-                hidden_layer = Dense(layer_connections, activation='relu')(dropout)
+        hidden_1 = keras.layers.Conv2D(16, (8,8), strides=(4, 4), activation='relu')(self.x_input)
+        hidden_2 = keras.layers.Conv2D(32, (4,4), strides=(2, 2), activation='relu')(hidden_2)
+
+        hidden_3 = keras.Dense(256, activation='relu')
 
         # Different output for each action:
         self.y_outputs = []
         for action_index in range(self.env.action_space.n):
-            self.y_outputs.append(Dense(1, activation='relu')(hidden_layer))
+            self.y_outputs.append(Dense(1)(hidden_layer))
 
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
