@@ -6,47 +6,18 @@ import numpy as np
 import random
 import keras
 import keras.backend as K
+import cv2
 from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from statistics import mean, median
 
-def squared_difference(y_true, y_pred):
+def squared_difference(y_true, y_pred): # Loss function
     return (y_true[0] - y_pred[0])**2
-
-    #TODO: Test this:
-def bilinear_interpolate(im, new_width, new_height):
-        x = [v for v in range(new_width)]
-        y = [v for v in range(new_height)]
-
-        x = np.asarray(x)
-        y = np.asarray(y)
-
-        x0 = np.floor(x).astype(int)
-        x1 = x0 + 1
-        y0 = np.floor(y).astype(int)
-        y1 = y0 + 1
-
-        x0 = np.clip(x0, 0, im.shape[1]-1);
-        x1 = np.clip(x1, 0, im.shape[1]-1);
-        y0 = np.clip(y0, 0, im.shape[0]-1);
-        y1 = np.clip(y1, 0, im.shape[0]-1);
-
-        Ia = im[ y0, x0 ]
-        Ib = im[ y1, x0 ]
-        Ic = im[ y0, x1 ]
-        Id = im[ y1, x1 ]
-
-        wa = (x1-x) * (y1-y)
-        wb = (x1-x) * (y-y0)
-        wc = (x-x0) * (y1-y)
-        wd = (x-x0) * (y-y0)
-
-        return wa*Ia + wb*Ib + wc*Ic + wd*Id
 
 class Agent:
 
     def __init__(self, environment, state_size, learning_rate=1e-4,
-    trace_size=10, memory_size=100000, input_x=64, input_y=84):
+    trace_size=4, memory_size=1000000):
         self.env = environment
         self.trace_size = trace_size
         self.state_size = state_size
@@ -61,14 +32,14 @@ class Agent:
         self.memory_index = 0
 
         self.lr = learning_rate
+
         # Input to the model is a sequence of scaled down screen states:
-        self.input_shape = (trace_size, input_y, input_x)
+        self.input_shape = (trace_size, 84, 84)
 
         self.build_model()
 
     def build_model(self, hidden_layers=5, layer_connections=128, drop_rate=0.0):
-        # First dimension is the batch size:
-        self.x_input = Input(shape=self.input_shape, name='y')
+        self.x_input = Input(shape=self.input_shape, name='x')
 
         for layer in range(hidden_layers):
             if(layer is 0):
@@ -86,9 +57,9 @@ class Agent:
 
         #self.model.summary()
         self.model.compile(loss=squared_difference,
-        loss_weights=[1.0 for n in range(self.env.action_space.n)],
-        metrics=['accuracy'],
-        optimizer='adam')
+            loss_weights=[1.0 for n in range(self.env.action_space.n)],
+            metrics=['accuracy'],
+            optimizer='adam')
         K.set_value(self.model.optimizer.lr, self.lr)
 
     def process_sequence(self, sequence_data):
@@ -96,7 +67,6 @@ class Agent:
         # size needed by the model.
         sequence_trace = sequence_data[-self.trace_size:]
         sequence_diff = self.trace_size - len(sequence_trace)
-
         if(sequence_diff > 0):
             for i in range(sequence_diff):
                 # Duplicate last state:
@@ -104,15 +74,31 @@ class Agent:
 
         sequence_trace = np.array(sequence_trace)
         # Remove colour:
-        sequence_trace = np.mean(sequence_trace, axis=3)
-        print("Seq:" + str(sequence_trace.shape))
+        sequence_trace = np.mean(sequence_trace, axis=3, keepdims=False)
         # Down sample:
-        # Could also try tensorflow image downsampling:
         downsampled_trace = []
         for state_image in sequence_trace:
-            downsampled_trace.append(bilinear_interpolate(state_image, 84, 84))
-        downsampled_trace = np.array(downsampled_trace)
-        print("Downsampled: " + str(downsampled_trace.shape))
+            resized = cv2.resize(state_image, (84, 110), interpolation=cv2.INTER_AREA)
+            downsampled_trace.append(resized[18:102, :])
+
+        return np.array(downsampled_trace).astype(np.uint8)
+
+    def get_output(self, x_input):
+        return self.model.predict(x_input)
+
+    def get_best_q_value(self, x_input, batch_index=0):
+        full_output = self.model.predict(x_input)
+        print(full_output)
+        exit()
+
+        best_q = None
+        for output_batches in full_output:
+            if(best_q is None):
+                best_q = output_batches
+            elif(output_batches > best_q):
+                best_q = output_batches
+
+        return best_q
 
     def get_best_action(self, x_input, batch_index=0):
         # List of q-values for each action:
@@ -132,21 +118,6 @@ class Agent:
             action_n += 1
 
         return best_action
-
-    def get_output(self, x_input):
-        return self.model.predict(x_input)
-
-    def get_best_q_value(self, x_input, batch_index=0):
-        full_output = self.model.predict(x_input)
-
-        best_q = None
-        for output_batches in full_output:
-            if(best_q is None):
-                best_q = output_batches[batch_index]
-            elif(output_batches[batch_index] > best_q):
-                best_q = output_batches[batch_index]
-
-        return best_q
 
     def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250,
     epsilon=1.0, display_frames=False):
@@ -181,11 +152,13 @@ class Agent:
                 if(not done):
                     sequence.append(next_state)
                 processed_next_state = self.process_sequence(sequence)
+                if(t == 200):
+                    cv2.imwrite(str(game) +'-frame-' + str(t) + '.png', processed_next_state[0])
                 # Append to memory (up to limit):
                 if(len(self.memory) < self.memory_size):
                     self.memory.append((processed_current_state, action, reward, processed_next_state, done))
                 elif(self.memory_index < self.memory_size):
-                    # Overwrite from the beginning(when full):
+                    # Overwrite from the beginning (when full):
                     self.memory[self.memory_index] = (processed_current_state, action, reward, processed_next_state, done)
                     self.memory_index += 1
                 else:
@@ -201,7 +174,7 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=250, batch_size=32,
+    def train_network(self, target_mean_score=245.0, games=10, batch_size=32,
     initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
     gamma=0.95, score_sample_size=250):
         # Trains the agent.
@@ -229,7 +202,7 @@ class Agent:
             print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(
             game, score, m_score, total_frames, e))
 
-            if((m_score >= target_mean_score) and (len(scores) > 100)):
+            if((m_score >= target_mean_score) and (len(scores) > 200)):
                 print('Target mean score reached')
                 break
             # Sample and train on mini-batch:
@@ -237,6 +210,8 @@ class Agent:
             p_batch = []
             target_q_batch = []
             for p_state, action, reward, p_next_state, done in mini_batch:
+                p_state = np.array([p_state])
+                p_next_state = np.array([p_next_state])
                 target = reward
                 if(not done):
                     target = reward + gamma*self.get_best_q_value(p_next_state)
