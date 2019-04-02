@@ -13,11 +13,11 @@ from keras.optimizers import Adam
 from statistics import mean, median
 
 def squared_difference(y_true, y_pred): # Loss function
-    return (y_true[0] - y_pred[0])**2
+    return (y_true[0][0] - y_pred[0][0])**2
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=6e-6,
+    def __init__(self, environment, state_size, learning_rate=4e-5,
                 trace_size=4, memory_size=250000):
         self.env = environment
         self.trace_size = trace_size
@@ -117,7 +117,7 @@ class Agent:
 
         return best_action
 
-    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250,
+    def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250000,
                     epsilon=1.0, display_frames=False):
         # Will append the memory with state/action/reward data and return the
         # average score:
@@ -171,7 +171,7 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=245.0, games=10, batch_size=32,
+    def train_network(self, target_mean_score=250.0, games=100, batch_size=32,
         initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
         gamma=0.95, score_sample_size=250):
         # Trains the agent.
@@ -205,7 +205,10 @@ class Agent:
             mini_batch = random.sample(self.memory, batch_size)
             p_batch = []
             target_q_batch = []
+            p_state_batches = []
+            q_batches = [[] for x in range(self.env.action_space.n)]
             for p_state, action, reward, p_next_state, done in mini_batch:
+                p_state_batches.append(p_state[0])
                 p_state = np.array([p_state])
                 p_next_state = np.array([p_next_state])
                 target = reward
@@ -214,12 +217,16 @@ class Agent:
 
                 # Predicted Q-values for each action according to the model:
                 q_values = self.model.predict(p_state[0])
-                actual = self.model.predict(p_state[0])
                 q_values[action] = np.array([target]) # With updated target.
 
-                print(q_values)
-                # Try to fit to the target Q-values for each action:
-                self.model.train_on_batch(p_state[0], q_values)
+                for i in range(len(q_batches)):
+                    q_batches[i].append(q_values[i][0])
+
+                #print(q_values)
+
+
+            # Try to fit to the target Q-values for each action:
+            self.model.fit(np.array(p_state_batches), q_batches, batch_size=32)
 
         print('Training complete')
         # TODO: Model saving:
