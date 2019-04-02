@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     env.close()
 
-    '''
+'''
 	for game in range(5):
 		observation = env.reset()
 		done = False
@@ -25,4 +25,4 @@ if __name__ == "__main__":
 			total_reward += reward
 			time.sleep(1.0/60.0)
 		print("Finished with total score {}".format(total_reward))
-	'''
+'''

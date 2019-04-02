@@ -17,8 +17,8 @@ def squared_difference(y_true, y_pred): # Loss function
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=1e-4,
-    trace_size=4, memory_size=1000000):
+    def __init__(self, environment, state_size, learning_rate=6e-6,
+                trace_size=4, memory_size=250000):
         self.env = environment
         self.trace_size = trace_size
         self.state_size = state_size
@@ -118,7 +118,7 @@ class Agent:
         return best_action
 
     def get_samples(self, stop_after_limit=True, n_games=500000, max_t=250,
-        epsilon=1.0, display_frames=False):
+                    epsilon=1.0, display_frames=False):
         # Will append the memory with state/action/reward data and return the
         # average score:
         game_counter = 0
@@ -172,8 +172,8 @@ class Agent:
         return mean(scores), frames
 
     def train_network(self, target_mean_score=245.0, games=10, batch_size=32,
-    initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
-    gamma=0.95, score_sample_size=250):
+        initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
+        gamma=0.95, score_sample_size=250):
         # Trains the agent.
         # Play randomly until memory has at least batch_size entries
         while(len(self.memory) < batch_size):
@@ -217,6 +217,7 @@ class Agent:
                 actual = self.model.predict(p_state[0])
                 q_values[action] = np.array([target]) # With updated target.
 
+                print(q_values)
                 # Try to fit to the target Q-values for each action:
                 self.model.train_on_batch(p_state[0], q_values)
 
