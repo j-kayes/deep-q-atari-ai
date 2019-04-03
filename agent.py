@@ -171,41 +171,6 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def generate_memory(self, batches=50000, file_name="memory_save"): 
-        # This can speed up the training process.
-        while(len(self.memory) < batches*batch_size):
-            self.get_samples(False, 1, epsilon=1.0)
-                with open(file_name, "wb") as fp:  
-                    pickle.dump(self.memory, fp)
-        
-    def train_on_memory(self, batch_size=32, file_name="memory_save"):
-        with open(file_name, "rb") as fp:  
-            saved_memory = pickle.load(fp)
-        
-        random.shuffle(saved_memory)
-
-        p_state_batches = []
-        # Each action has its own batch:
-        q_batches = [[] for x in range(self.env.action_space.n)] 
-        for p_state, action, reward, p_next_state, done in mini_batch:
-            p_state_batches.append(p_state[0])
-            p_state = np.array([p_state])
-            p_next_state = np.array([p_next_state])
-            target = reward
-            if(not done):
-                target = reward + gamma*self.get_best_q_value(p_next_state)
-
-                # Predicted Q-values for each action according to the model:
-                q_values = self.model.predict(p_state[0])
-                q_values[action] = np.array([target]) # With updated target.
-
-                for a in range(len(q_values)):
-                    q_batches[a].append(q_values[a][0])
-
-                # Model expects a list of np arrays:
-                q_batches = [np.array(q_batch) for q_batch in q_batches] # q_batch for each action.
-        self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size)
-
     def train_network(self, target_mean_score=1250.0, games=10000000, batch_size=32,
             initial_epsilon=1.0, final_epsilon=0.1, epsilon_frames_range=1000000,
             gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=150,
