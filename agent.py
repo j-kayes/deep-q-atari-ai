@@ -7,6 +7,7 @@ import random
 import keras
 import keras.backend as K
 import cv2
+import pickle
 from keras.models import load_model
 from keras.models import Model
 from keras.layers import Dense, Dropout, Input
@@ -15,8 +16,8 @@ from statistics import mean, median
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=5e-6,
-                trace_size=4, memory_size=1000000):
+    def __init__(self, environment, state_size, learning_rate=4e-6,
+                final_lr=2e-6, trace_size=4, memory_size=1000):
         self.env = environment
         self.trace_size = trace_size
         self.state_size = state_size
@@ -31,6 +32,8 @@ class Agent:
         self.memory_index = 0
 
         self.lr = learning_rate
+        # This is the final value for the lr if annealing its value:
+        self.final_lr = final_lr
 
         # Input to the model is a sequence of scaled down screen states:
         self.input_shape = (84, 84, trace_size)
@@ -133,7 +136,6 @@ class Agent:
                 frames += 1
                 action = None
                 processed_current_state = np.array([self.process_sequence(sequence)])
-                assert(processed_current_state.shape is not (1,84,84,4))
                 # We start with a high epsilon:
                 if(random.random() < epsilon):
                     action = self.env.action_space.sample()
@@ -169,11 +171,46 @@ class Agent:
                     break
         return mean(scores), frames
 
+    def generate_memory(self, batches=50000, file_name="memory_save"): 
+        # This can speed up the training process.
+        while(len(self.memory) < batches*batch_size):
+            self.get_samples(False, 1, epsilon=1.0)
+                with open(file_name, "wb") as fp:  
+                    pickle.dump(self.memory, fp)
+        
+    def train_on_memory(self, batch_size=32, file_name="memory_save"):
+        with open(file_name, "rb") as fp:  
+            saved_memory = pickle.load(fp)
+        
+        random.shuffle(saved_memory)
+
+        p_state_batches = []
+        # Each action has its own batch:
+        q_batches = [[] for x in range(self.env.action_space.n)] 
+        for p_state, action, reward, p_next_state, done in mini_batch:
+            p_state_batches.append(p_state[0])
+            p_state = np.array([p_state])
+            p_next_state = np.array([p_next_state])
+            target = reward
+            if(not done):
+                target = reward + gamma*self.get_best_q_value(p_next_state)
+
+                # Predicted Q-values for each action according to the model:
+                q_values = self.model.predict(p_state[0])
+                q_values[action] = np.array([target]) # With updated target.
+
+                for a in range(len(q_values)):
+                    q_batches[a].append(q_values[a][0])
+
+                # Model expects a list of np arrays:
+                q_batches = [np.array(q_batch) for q_batch in q_batches] # q_batch for each action.
+        self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size)
+
     def train_network(self, target_mean_score=1250.0, games=10000000, batch_size=32,
             initial_epsilon=1.0, final_epsilon=0.1, epsilon_frames_range=1000000,
-            gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=150):
+            gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=150,
+            lr_annealing_range=1000000):
         # Trains the agent.
-        # Play randomly until memory has at least batch_size entries
         while(len(self.memory) < batch_size):
             self.get_samples(False, 1, epsilon=1.0)
         total_frames = 0
@@ -185,7 +222,7 @@ class Agent:
                 e = initial_epsilon - ((initial_epsilon - final_epsilon) * (total_frames / epsilon_frames_range))
             else:
                 e = final_epsilon
-            # Play a  game, and record data to memory buffer:
+            # Play a game, and record data to memory buffer:
             score, frames = self.get_samples(False, 1, epsilon=e)
             scores.append(score)
             if(len(scores) == score_sample_size):
@@ -200,7 +237,8 @@ class Agent:
                 break
             if(game % train_every == 0 and (game is not 0)):
                 # Sample and train on mini-batch:
-                mini_batch = random.sample(self.memory, batches_per_train*batch_size)
+                mini_batch = random.sample(self.memory, batches_per_train*batch_size) 
+                
                 p_state_batches = []
                 # Each action has its own batch:
                 q_batches = [[] for x in range(self.env.action_space.n)] 
@@ -228,10 +266,17 @@ class Agent:
                     self.model.save('latest_save.h5')
                 if(game % (10*train_every) == 0): # Every 10th update:
                     filename = str(game) + "-" + str(m_score) + "-" + str(total_frames) + "-" + str(total_batch_updates)
-                    self.model.save(filename + ".h5")
+                    self.model.save(filename + ".h5") # Save model at this point.
 
                 # Try to fit to the target Q-values for each action:
                 self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size, verbose=int(display_progress))
+
+                # Anneal learning rate:
+                if(total_frames < lr_annealing_range):
+                    new_lr = self.lr - ((self.lr - self.final_lr) * (total_frames / lr_annealing_range))
+                    K.set_value(self.model.optimizer.lr, new_lr)
+                else:
+                    K.set_value(self.model.optimizer.lr, self.final_lr)
 
                 total_batch_updates += batches_per_train
                 print('Games: {}, Mean Score: {:.2f}, Frames: {}, e: {:.4f}, Batch Updates: {}'.format(
@@ -242,7 +287,6 @@ class Agent:
         print('Model saved: final_model.h5')
 
     def load_model(self, path):
-        print('Attempting to load previously saved model...')
         return load_model(path)
 
     # Play and record scores with the currently loaded graph:
