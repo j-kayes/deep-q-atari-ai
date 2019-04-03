@@ -7,18 +7,16 @@ import random
 import keras
 import keras.backend as K
 import cv2
+from keras.models import load_model
 from keras.models import Model
 from keras.layers import Dense, Dropout, Input
 from keras.optimizers import Adam
 from statistics import mean, median
 
-def squared_difference(y_true, y_pred): # Loss function
-    return (y_true[0][0] - y_pred[0][0])**2
-
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=4e-5,
-                trace_size=4, memory_size=250000):
+    def __init__(self, environment, state_size, learning_rate=5e-6,
+                trace_size=4, memory_size=1000000):
         self.env = environment
         self.trace_size = trace_size
         self.state_size = state_size
@@ -55,7 +53,7 @@ class Agent:
 
         self.model = Model(inputs=self.x_input, outputs=self.y_outputs)
 
-        self.model.compile(loss=squared_difference,
+        self.model.compile(loss='mean_squared_error',
                     loss_weights=[1.0 for n in range(self.env.action_space.n)],
                     metrics=['accuracy'],
                     optimizer=Adam(lr=self.lr))
@@ -171,14 +169,15 @@ class Agent:
                     break
         return mean(scores), frames
 
-    def train_network(self, target_mean_score=250.0, games=100, batch_size=32,
-        initial_epsilon=1.0, final_epsilon=0.05, epsilon_frames_range=10000,
-        gamma=0.95, score_sample_size=250):
+    def train_network(self, target_mean_score=1250.0, games=10000000, batch_size=32,
+            initial_epsilon=1.0, final_epsilon=0.1, epsilon_frames_range=1000000,
+            gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=150):
         # Trains the agent.
         # Play randomly until memory has at least batch_size entries
         while(len(self.memory) < batch_size):
             self.get_samples(False, 1, epsilon=1.0)
         total_frames = 0
+        total_batch_updates = 0
         scores = []
         for game in range(games):
             # Scales linearly from initial to final epsilon:
@@ -195,50 +194,59 @@ class Agent:
 
             m_score = mean(scores)
             total_frames += frames
-            print('Game: {} Score: {}, Mean: {:.2f} Frames: {} e: {:.4f}'.format(
-            game, score, m_score, frames, e))
 
             if((m_score >= target_mean_score) and (len(scores) > 200)):
                 print('Target mean score reached')
                 break
-            # Sample and train on mini-batch:
-            mini_batch = random.sample(self.memory, batch_size)
-            p_batch = []
-            target_q_batch = []
-            p_state_batches = []
-            q_batches = [[] for x in range(self.env.action_space.n)]
-            for p_state, action, reward, p_next_state, done in mini_batch:
-                p_state_batches.append(p_state[0])
-                p_state = np.array([p_state])
-                p_next_state = np.array([p_next_state])
-                target = reward
-                if(not done):
-                    target = reward + gamma*self.get_best_q_value(p_next_state)
+            if(game % train_every == 0 and (game is not 0)):
+                # Sample and train on mini-batch:
+                mini_batch = random.sample(self.memory, batches_per_train*batch_size)
+                p_state_batches = []
+                # Each action has its own batch:
+                q_batches = [[] for x in range(self.env.action_space.n)] 
+                for p_state, action, reward, p_next_state, done in mini_batch:
+                    p_state_batches.append(p_state[0])
+                    p_state = np.array([p_state])
+                    p_next_state = np.array([p_next_state])
+                    target = reward
+                    if(not done):
+                        target = reward + gamma*self.get_best_q_value(p_next_state)
 
-                # Predicted Q-values for each action according to the model:
-                q_values = self.model.predict(p_state[0])
-                q_values[action] = np.array([target]) # With updated target.
+                    # Predicted Q-values for each action according to the model:
+                    q_values = self.model.predict(p_state[0])
+                    q_values[action] = np.array([target]) # With updated target.
 
-                for i in range(len(q_batches)):
-                    q_batches[i].append(q_values[i][0])
+                    for a in range(len(q_values)):
+                        q_batches[a].append(q_values[a][0])
 
-                #print(q_values)
+                # Model expects a list of np arrays:
+                q_batches = [np.array(q_batch) for q_batch in q_batches] # q_batch for each action.
 
+                display_progress = False
+                if(game % (5*train_every) == 0): # Only print training progress every 5 updates:
+                    display_progress = True
+                    self.model.save('latest_save.h5')
+                if(game % (10*train_every) == 0): # Every 10th update:
+                    filename = str(game) + "-" + str(m_score) + "-" + str(total_frames) + "-" + str(total_batch_updates)
+                    self.model.save(filename + ".h5")
 
-            # Try to fit to the target Q-values for each action:
-            self.model.fit(np.array(p_state_batches), q_batches, batch_size=32)
+                # Try to fit to the target Q-values for each action:
+                self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size, verbose=int(display_progress))
+
+                total_batch_updates += batches_per_train
+                print('Games: {}, Mean Score: {:.2f}, Frames: {}, e: {:.4f}, Batch Updates: {}'.format(
+                game, m_score, total_frames, e, total_batch_updates))
 
         print('Training complete')
-        # TODO: Model saving:
-        #save_path = self.saver.save(self.sess, 'saved/model.ckpt')
-        #print('Model saved: {}'.format(save_path))
+        self.model.save('final_model.h5')
+        print('Model saved: final_model.h5')
 
     def load_model(self, path):
         print('Attempting to load previously saved model...')
-        self.saver.restore(self.sess, path)
+        return load_model(path)
 
     # Play and record scores with the currently loaded graph:
-    def play(self, games=100, epsilo=0.05, show_game=True):
+    def play(self, games=1, epsilo=0.05, show_game=False):
         scores = []
         total_frames = 0
         for game in range(games):
