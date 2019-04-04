@@ -1,5 +1,6 @@
 '''
-    Agent learns to beat the Atari games from OpenAI gym.
+    Agent that learns to beat the Atari games from OpenAI gym.
+    
     Copywrite James Kayes (c) 2019
 '''
 import numpy as np
@@ -16,8 +17,8 @@ from statistics import mean, median
 
 class Agent:
 
-    def __init__(self, environment, state_size, learning_rate=4e-6,
-                final_lr=2e-6, trace_size=4, memory_size=1000):
+    def __init__(self, environment, state_size, learning_rate=6e-7,
+                final_lr=1e-7, trace_size=4, memory_size=750000):
         self.env = environment
         self.trace_size = trace_size
         self.state_size = state_size
@@ -159,7 +160,7 @@ class Agent:
                     self.memory[self.memory_index] = (processed_current_state, action, reward, processed_next_state, done)
                     self.memory_index += 1
                 else:
-                    self.memory[0] = (processed_current_state, action, reward, processed_next_state)
+                    self.memory[0] = (processed_current_state, action, reward, processed_next_state, done)
                     self.memory_index = 1
 
                 if(done):  # Game over
@@ -170,13 +171,15 @@ class Agent:
                 if(len(self.memory) >= self.memory_size):
                     break
         return mean(scores), frames
-
+    
+    # TODO: Reset these variables:
     def train_network(self, target_mean_score=1250.0, games=10000000, batch_size=32,
-            initial_epsilon=1.0, final_epsilon=0.1, epsilon_frames_range=1000000,
-            gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=150,
+            initial_epsilon=0.1, final_epsilon=0.1, epsilon_frames_range=1000000,
+            gamma=0.95, score_sample_size=250, train_every=20, batches_per_train=200,
             lr_annealing_range=1000000):
         # Trains the agent.
-        while(len(self.memory) < batch_size):
+        print('Filling initial memory with random play data (this can take a few minutes)...')
+        while(len(self.memory) < 6400):
             self.get_samples(False, 1, epsilon=1.0)
         total_frames = 0
         total_batch_updates = 0
@@ -225,16 +228,12 @@ class Agent:
                 # Model expects a list of np arrays:
                 q_batches = [np.array(q_batch) for q_batch in q_batches] # q_batch for each action.
 
-                display_progress = False
-                if(game % (5*train_every) == 0): # Only print training progress every 5 updates:
-                    display_progress = True
-                    self.model.save('latest_save.h5')
                 if(game % (10*train_every) == 0): # Every 10th update:
                     filename = str(game) + "-" + str(m_score) + "-" + str(total_frames) + "-" + str(total_batch_updates)
                     self.model.save(filename + ".h5") # Save model at this point.
 
                 # Try to fit to the target Q-values for each action:
-                self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size, verbose=int(display_progress))
+                self.model.fit(np.array(p_state_batches), q_batches, batch_size=batch_size, verbose=1)
 
                 # Anneal learning rate:
                 if(total_frames < lr_annealing_range):
